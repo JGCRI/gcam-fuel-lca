@@ -22,7 +22,7 @@ gcam_data.proj <- loadProject("rgcam/gcam_data.proj")
 REQUERY_OUTPUT <- FALSE
 if(REQUERY_OUTPUT){
   conn <- localDBConn("/Users/D3P747/Desktop/stash/freight_fuels/output/", "database_basexdb")
-  gcam_data.proj <- addScenario(conn, gcam_data.proj, c(), "BatchQueries_gcam_lca.xml", clobber = TRUE)
+  gcam_data.proj <- addScenario(conn, gcam_data.proj, c(), "rgcam/BatchQueries_gcam_lca.xml", clobber = TRUE)
 }
 
 # the method starts from a technology, so the queries are done at the technology level. however once the immediate inputs to
