@@ -1,0 +1,13 @@
+sector,subsector,technology,fuel,reporting_fuel
+ammonia energy,ammonia energy,ammonia energy,ammonia,ammonia
+diesel,biomass liquids,FT biofuels,FT biofuels,FT biofuels
+diesel,biomass liquids,FT biofuels CCS level 1,FT biofuels CCS1,FT biofuels CCS
+diesel,biomass liquids,FT biofuels CCS level 2,FT biofuels CCS2,FT biofuels CCS
+diesel,biomass liquids,renewable diesel,renewable diesel,renewable diesel
+diesel,e-fuels,e-diesel,e-diesel,e-diesel
+diesel,oil refining,oil refining,petroleum diesel,petroleum diesel
+elect_td_trn,elect_td_trn,elect_td_trn,electricity,electricity
+H2 MHDV,H2 delivery,H2 liquid truck,hydrogen from LH2truck,hydrogen
+H2 MHDV,H2 delivery,H2 pipeline,hydrogen from pipeline,hydrogen
+H2 MHDV,onsite production,electrolysis,hydrogen onsite electrolysis,hydrogen
+H2 MHDV,onsite production,natural gas steam reforming,hydrogen onsite smr,hydrogen

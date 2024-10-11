@@ -1,0 +1,15 @@
+sector,Primary_fuel,CO2_kgGJ
+biomass,Biomass,0
+carbon-storage,,-3.667
+distributed_solar,Solar,0
+elec_geothermal,Geothermal,0
+hydropower,Hydropower,0
+global solar resource,Solar,0
+nuclearFuelGenII,Nuclear,0
+nuclearFuelGenIII,Nuclear,0
+offshore wind resource,Wind,0
+onshore wind resource,Wind,0
+regional biomassOil,Soybean oil,0
+regional coal,Coal,100.1
+regional natural gas,Natural Gas,52.067
+regional oil,Oil,71.867

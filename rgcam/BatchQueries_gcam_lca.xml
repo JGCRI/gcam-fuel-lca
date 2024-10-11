@@ -1,0 +1,58 @@
+<queries>
+    <aQuery>
+		<region name="USA"/>
+            <supplyDemandQuery title="inputs by tech">
+                <axis1 name="input">input</axis1>
+                <axis2 name="Year">demand-physical[@vintage]</axis2>
+                <xPath buildList="true" dataName="input" group="false" sumAll="false">*[@type='sector']/*[@type='subsector']/*[@type='technology']/*[@type='input']/demand-physical/node()</xPath>
+                <comments/>
+            </supplyDemandQuery>
+    </aQuery>
+      	<aQuery>
+		<region name="USA"/>
+            <supplyDemandQuery title="outputs by tech">
+                <axis1 name="technology">technology[@name]</axis1>
+                <axis2 name="Year">physical-output[@vintage]</axis2>
+                <xPath buildList="true" dataName="output" group="false" sumAll="false">*[@type='sector']/*[@type='subsector']/*[@type='technology']/*[@type='output']/physical-output/node()</xPath>
+                <comments/>
+            </supplyDemandQuery>
+      </aQuery>
+      <aQuery>
+		<region name="USA"/>
+            <supplyDemandQuery title="prices by sector">
+                <axis1 name="sector">sector</axis1>
+                <axis2 name="Year">cost</axis2>
+                <xPath buildList="true" dataName="Price" group="false" sumAll="false">*[@type = 'sector']/cost/text()</xPath>
+                <comments/>
+            </supplyDemandQuery>
+      </aQuery>
+      <aQuery>
+		<region name="USA"/>
+            <supplyDemandQuery title="costs by tech">
+                <axis1 name="technology">technology</axis1>
+                <axis2 name="Year">technology</axis2>
+                <xPath buildList="true" dataName="cost" group="false" sumAll="false">*[@type='sector' and (local-name()!='AgSupplySector')]/*[@type = 'subsector']/*[@type = 'technology']/cost/text()</xPath>
+                <comments>Excludes AgProductionTechnology costs, where data written out are no meaningful</comments>
+            </supplyDemandQuery>
+      </aQuery>
+      <aQuery>
+		<region name="USA"/>
+            <emissionsQueryBuilder title="CO2 sequestration by tech">
+                <axis1 name="subsector">subsector</axis1>
+                <axis2 name="Year">emissions-sequestered</axis2>
+                <xPath buildList="true" dataName="emissions" group="false" sumAll="false">*[@type = 'sector' ]/*[@type='subsector']/*[@type='technology']//
+            CO2/emissions-sequestered/node()</xPath>
+                <comments/>
+            </emissionsQueryBuilder>
+      </aQuery>
+      	<aQuery>
+		<region name="USA"/>
+            <emissionsQueryBuilder title="CH4 and N2O emissions by tech">
+                <axis1 name="GHG">GHG</axis1>
+                <axis2 name="Year">emissions</axis2>
+                <xPath buildList="true" dataName="emissions" group="false" sumAll="false">*[@type = 'sector']/*[@type = 'subsector']/*[@type = 'technology']/
+            *[@type = 'GHG' and (@name='CH4' or @name='N2O' or @name='N2O_AGR')]/emissions/node()</xPath>
+                <comments/>
+            </emissionsQueryBuilder>
+          </aQuery>
+    </queries>
