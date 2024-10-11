@@ -8,6 +8,7 @@ library(readr)
 
 fuel_techs <- read_csv("inputs/fuel_techs.csv")
 co2_ef <- read_csv("inputs/co2_ef.csv")
+nonco2_gwp <- read_csv("inputs/nonco2_gwp.csv")
 
 #-------------------------------------------------------------------------------
 
@@ -15,6 +16,7 @@ CONV_USD_1975_2020 <- 3.8
 ANALYSIS_YEARS <- seq(2030, 2050, 10)
 RECURSION_DEPTH <- 10
 PRIMARY_COMMODITIES <- co2_ef$sector
+NONCO2_GHGS <- c("CH4", "H2", "N2O")
 
 #-------------------------------------------------------------------------------
 
@@ -50,14 +52,22 @@ hydro_tech <- filter(outputs_tech,
                      technology =="hydro", year %in% ANALYSIS_YEARS) %>%
   mutate(input = "hydropower")
 
-# carbon-storage is not picked up as an input to technologies. map it in
+# non-co2 emissions and carbon storage are not technically inputs to a technology, but categorizing them as such
+# allows for the upstream attribution to take place alongside energy and co2 emissions attribution
+# mapping in carbon-storage
 ccs_tech <- getQuery(gcam_data.proj, "CO2 sequestration by tech") %>%
-  select(-region, -Units) %>%
   filter(year %in% ANALYSIS_YEARS) %>%
-  mutate(input = "carbon-storage")
+  mutate(input = "carbon-storage") %>%
+  select(scenario, sector, subsector, technology, input, year, value)
+
+# nonco2 emissions are similarly treated as inputs to a technology. Drop the AGR suffix
+nonco2_tech <- getQuery(gcam_data.proj, "NonCO2 GHG emissions by tech") %>%
+  mutate(input = sub("_AGR", "", ghg)) %>%
+  filter(year %in% ANALYSIS_YEARS) %>%
+  select(scenario, sector, subsector, technology, input, year, value)
 
 # bind in ancillary data to inputs by technology data table
-inputs_tech <- bind_rows(inputs_tech, hydro_tech, ccs_tech)
+inputs_tech <- bind_rows(inputs_tech, hydro_tech, ccs_tech,nonco2_tech)
 
 inputs_sector <- inputs_tech %>%
   group_by(scenario, sector, input, year) %>%
@@ -93,6 +103,14 @@ fuels_primary_energy <- tibble(fuel = character(0),
                                EJ_out = numeric(),
                                IO = numeric())
 
+fuels_upstream_nonco2_co2e <- tibble(fuel = character(0),
+                                      scenario = character(0),
+                                      year = numeric(),
+                                      GHG = character(0),
+                                      MtCO2e = numeric(),
+                                      EJ_out = numeric(),
+                                      kgCO2_GJ = numeric())
+
 # for each technology (fuel) analyzed, as indicated in fuel_techs.csv:
 for(i in 1:nrow(fuel_techs)){
 
@@ -111,7 +129,8 @@ for(i in 1:nrow(fuel_techs)){
   
   # separate out any primary energy inputs, and pass the remaining data table to the next step
   primary_inputs <- filter(upstream_inputs, sector %in% PRIMARY_COMMODITIES)
-  upstream_inputs <- filter(upstream_inputs, !sector %in% PRIMARY_COMMODITIES)
+  upstream_nonco2 <- filter(upstream_inputs, sector %in% NONCO2_GHGS)
+  upstream_inputs <- filter(upstream_inputs, !sector %in% c(PRIMARY_COMMODITIES, NONCO2_GHGS))
   
   # Remaining steps are at the sectoral level. relationship="many-to-many" in the join as there may be multiple paths to
   # the same upstream commodity at the same recursion depth (e.g., electricity may be an input to multiple intermediate inputs)
@@ -125,11 +144,18 @@ for(i in 1:nrow(fuel_techs)){
       
       primary_inputs <- bind_rows(primary_inputs,
                                   filter(upstream_inputs, sector %in% PRIMARY_COMMODITIES))
-      upstream_inputs <- filter(upstream_inputs, !sector %in% PRIMARY_COMMODITIES)
+      upstream_nonco2 <- bind_rows(upstream_nonco2,
+                                  filter(upstream_inputs, sector %in% NONCO2_GHGS))
+      upstream_inputs <- filter(upstream_inputs, !sector %in% c(PRIMARY_COMMODITIES, NONCO2_GHGS))
     }
-  # aggregate by commodity type ("sector")
+  # aggregate primary energy by commodity type ("sector")
   primary_inputs <- group_by(primary_inputs, scenario, sector, year) %>%
     summarise(EJ_in = sum(value)) %>%
+    ungroup()
+
+  # aggregate nonco2 emissions by GHG type ("sector")
+  upstream_nonco2 <- group_by(upstream_nonco2, scenario, sector, year) %>%
+    summarise(TG = sum(value)) %>%
     ungroup()
   
   # calculate CO2 emissions (Mt CO2) by joining in emissions factors, multiplying, and adding
@@ -156,6 +182,16 @@ for(i in 1:nrow(fuel_techs)){
     select(fuel, scenario, year, Primary_fuel, EJ_in, EJ_out, IO)
   
   fuels_primary_energy <- bind_rows(fuels_primary_energy, primary_energy)
+  
+  upstream_nonco2_co2e <- upstream_nonco2 %>%
+    rename(GHG = sector) %>%
+    left_join(nonco2_gwp, by = "GHG") %>%
+    mutate(MtCO2e = TG * GWP) %>%
+    left_join(fuel_production, by = c("scenario", "year")) %>%
+    mutate(kgCO2_GJ = MtCO2e / EJ_out) %>%
+    select(fuel, scenario, year, GHG, MtCO2e, EJ_out, kgCO2_GJ)
+  
+  fuels_upstream_nonco2_co2e <- bind_rows(fuels_upstream_nonco2_co2e, upstream_nonco2_co2e)
   }
 
 # in some cases, the fuel production technologies may be more granular than what we want for reporting.
@@ -182,16 +218,25 @@ fuels_primary_energy <- fuels_primary_energy %>%
   rename(fuel = reporting_fuel) %>%
   select(fuel, scenario, year, Primary_fuel, IO)
 
+fuels_upstream_nonco2_co2e <- fuels_upstream_nonco2_co2e %>%
+  left_join(select(fuel_techs, fuel, reporting_fuel),
+            by = "fuel") %>%
+  group_by(reporting_fuel, scenario, year, GHG) %>%
+  summarise(MtCO2e = sum(MtCO2e),
+            EJ_out = sum(EJ_out)) %>%
+  ungroup() %>%
+  mutate(kgCO2_GJ = MtCO2e / EJ_out) %>%
+  rename(fuel = reporting_fuel) %>%
+  select(fuel, scenario, year, GHG, kgCO2_GJ)
+
 # write out the data tables
 write_csv(fuels_upstream_co2, "outputs/fuels_upstream_co2.csv")
 write_csv(fuels_primary_energy, "outputs/fuels_primary_energy.csv")
+write_csv(fuels_upstream_nonco2_co2e, "outputs/fuels_upstream_nonco2_co2e.csv")
 
 # todo
 # add in tailpipe emissions (just output times exogenous CO2, CH4, N2O emissions factors)
 # compile and write out price data
-# assign CH4 and N2O emissions as "inputs by sector"
-# assign them as primary commodities in co2_ef (EF = GWP)
-# keep them separate for reporting purposes
 
 
 

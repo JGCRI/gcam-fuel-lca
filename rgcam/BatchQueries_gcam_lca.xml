@@ -47,11 +47,11 @@
       </aQuery>
       	<aQuery>
 		<region name="USA"/>
-            <emissionsQueryBuilder title="CH4 and N2O emissions by tech">
+            <emissionsQueryBuilder title="NonCO2 GHG emissions by tech">
                 <axis1 name="GHG">GHG</axis1>
                 <axis2 name="Year">emissions</axis2>
                 <xPath buildList="true" dataName="emissions" group="false" sumAll="false">*[@type = 'sector']/*[@type = 'subsector']/*[@type = 'technology']/
-            *[@type = 'GHG' and (@name='CH4' or @name='N2O' or @name='N2O_AGR')]/emissions/node()</xPath>
+            *[@type = 'GHG' and (@name='CH4' or @name='N2O' or @name='N2O_AGR' or @name='H2')]/emissions/node()</xPath>
                 <comments/>
             </emissionsQueryBuilder>
           </aQuery>
