@@ -9,10 +9,13 @@ library(readr)
 fuel_techs <- read_csv("inputs/fuel_techs.csv")
 co2_ef <- read_csv("inputs/co2_ef.csv")
 nonco2_gwp <- read_csv("inputs/nonco2_gwp.csv")
+fuel_delivery_cost <- read_csv("inputs/fuel_delivery_cost.csv")
 
 #-------------------------------------------------------------------------------
 
 CONV_USD_1975_2020 <- 3.8
+CONV_USD_1990_2020 <- 1.772
+CONV_C_CO2 <- 44/12
 ANALYSIS_YEARS <- seq(2030, 2050, 10)
 RECURSION_DEPTH <- 10
 PRIMARY_COMMODITIES <- co2_ef$sector
@@ -255,15 +258,50 @@ fuels_tailpipe_nonco2_co2e <- outputs_tech %>%
   mutate(kgCO2e_GJ = value.MtCO2e / value.EJ) %>%
   select(fuel = reporting_fuel, scenario, year, GHG, kgCO2e_GJ)
 
+# prices: calculated from output-weighted average where multiple techs pipe to the same reporting fuel
+# the first step is to add in the delivery costs where those are indicated in a separate sector
+delivered_fuel_prices <- getQuery(gcam_data.proj, "prices by sector") %>%
+  filter(year %in% ANALYSIS_YEARS,
+         sector %in% fuel_delivery_cost$delivery_cost)
+delivery_costs <- getQuery(gcam_data.proj, "prices by sector") %>%
+  filter(year %in% ANALYSIS_YEARS,
+         sector %in% fuel_delivery_cost$sector) %>%
+  left_join(fuel_delivery_cost, by = "sector") %>%
+  left_join(delivered_fuel_prices, by = c("scenario", delivery_cost = "sector", "year")) %>%
+  mutate(delivery_cost = value.y - value.x) %>%
+  select(scenario, sector, year, delivery_cost)
+
+# co2 penalties are estimated from scenario-specific co2 prices, converted to 2020$ per kg of CO2
+co2_penalties <- getQuery(gcam_data.proj, "CO2 prices") %>%
+  filter(market == "USACO2") %>%
+  mutate(USD_kgCO2 = value * CONV_USD_1990_2020 / CONV_C_CO2 / 1000) %>%
+  select(scenario, year, USD_kgCO2)
+
+fuels_prices <- getQuery(gcam_data.proj, "costs by tech") %>%
+  inner_join(fuel_techs, by = c("sector", "subsector", "technology")) %>%
+  filter(year %in% ANALYSIS_YEARS) %>%
+  left_join(delivery_costs, by = c("scenario", "sector", "year")) %>%
+  left_join(co2_penalties, by = c("scenario", "year")) %>%
+  replace_na(list(delivery_cost = 0, USD_kgCO2 = 0)) %>%
+  left_join(outputs_tech, by = c("scenario", "sector", "subsector", "technology", "year"),
+            suffix = c(".price", ".quantity")) %>%
+  mutate(total.price = (value.price + delivery_cost) * CONV_USD_1975_2020 + (kgCO2_GJ * USD_kgCO2),
+         weighted.price = total.price * value.quantity) %>%
+  group_by(scenario, reporting_fuel, year) %>%
+  summarise(weighted.price = sum(weighted.price),
+            value.quantity = sum(value.quantity)) %>%
+  ungroup() %>%
+  mutate(price_USDperGJ = weighted.price / value.quantity) %>%
+  select(-weighted.price, -value.quantity)
+
 # write out the data tables
 write_csv(fuels_upstream_co2, "outputs/fuels_upstream_co2.csv")
 write_csv(fuels_primary_energy, "outputs/fuels_primary_energy.csv")
 write_csv(fuels_upstream_nonco2_co2e, "outputs/fuels_upstream_nonco2_co2e.csv")
 write_csv(fuels_tailpipe_co2, "outputs/fuels_tailpipe_co2.csv")
 write_csv(fuels_tailpipe_nonco2_co2e, "outputs/fuels_tailpipe_nonco2_co2e.csv")
+write_csv(fuels_prices, "outputs/fuels_prices.csv")
 
-# todo
-# compile and write out price data
 
 
 
