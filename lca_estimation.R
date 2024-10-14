@@ -40,7 +40,7 @@ outputs_sector <- outputs_tech %>%
   summarise(value = sum(value)) %>%
   ungroup()
 
-#inputs: drop all water (not within scops of LCA), and oil-credits
+#inputs: drop all water (not within scope of LCA), and oil-credits
 inputs_tech <- getQuery(gcam_data.proj, "inputs by tech") %>%
   select(-Units, -region) %>%
   filter(!grepl("water", input),
@@ -229,13 +229,40 @@ fuels_upstream_nonco2_co2e <- fuels_upstream_nonco2_co2e %>%
   rename(fuel = reporting_fuel) %>%
   select(fuel, scenario, year, GHG, kgCO2_GJ)
 
+# tailpipe co2: this data table does not require any GCAM output, other than the scenario list
+fuels_tailpipe_co2 <- fuel_techs %>%
+  select(reporting_fuel, kgCO2_GJ) %>%
+  distinct() %>%
+  mutate(year = NA_real_,
+         scenario = NA_character_) %>%
+  complete(nesting(reporting_fuel, kgCO2_GJ),
+           year = ANALYSIS_YEARS,
+           scenario = unique(outputs_tech$scenario)) %>%
+  select(fuel = reporting_fuel, scenario, year, kgCO2_GJ)
+
+#tailpipe nonco2s
+fuels_tailpipe_nonco2_co2e <- outputs_tech %>%
+  inner_join(fuel_techs, by = c("sector", "subsector", "technology")) %>%
+  filter(year %in% ANALYSIS_YEARS) %>%
+  inner_join(nonco2_tech, by = c("scenario", "sector", "subsector", "technology", "year"),
+             suffix = c(".EJ", ".TG")) %>%
+  rename(GHG = input) %>%
+  left_join(nonco2_gwp, by = "GHG") %>%
+  group_by(reporting_fuel, scenario, year, GHG) %>%
+  summarise(value.MtCO2e = sum(value.TG * GWP),
+            value.EJ = sum(value.EJ)) %>%
+  ungroup() %>%
+  mutate(kgCO2e_GJ = value.MtCO2e / value.EJ) %>%
+  select(fuel = reporting_fuel, scenario, year, GHG, kgCO2e_GJ)
+
 # write out the data tables
 write_csv(fuels_upstream_co2, "outputs/fuels_upstream_co2.csv")
 write_csv(fuels_primary_energy, "outputs/fuels_primary_energy.csv")
 write_csv(fuels_upstream_nonco2_co2e, "outputs/fuels_upstream_nonco2_co2e.csv")
+write_csv(fuels_tailpipe_co2, "outputs/fuels_tailpipe_co2.csv")
+write_csv(fuels_tailpipe_nonco2_co2e, "outputs/fuels_tailpipe_nonco2_co2e.csv")
 
 # todo
-# add in tailpipe emissions (just output times exogenous CO2, CH4, N2O emissions factors)
 # compile and write out price data
 
 
