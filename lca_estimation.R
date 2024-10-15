@@ -112,7 +112,7 @@ fuels_upstream_nonco2_co2e <- tibble(fuel = character(0),
                                       GHG = character(0),
                                       MtCO2e = numeric(),
                                       EJ_out = numeric(),
-                                      kgCO2_GJ = numeric())
+                                      kgCO2e_GJ = numeric())
 
 # for each technology (fuel) analyzed, as indicated in fuel_techs.csv:
 for(i in 1:nrow(fuel_techs)){
@@ -191,8 +191,8 @@ for(i in 1:nrow(fuel_techs)){
     left_join(nonco2_gwp, by = "GHG") %>%
     mutate(MtCO2e = TG * GWP) %>%
     left_join(fuel_production, by = c("scenario", "year")) %>%
-    mutate(kgCO2_GJ = MtCO2e / EJ_out) %>%
-    select(fuel, scenario, year, GHG, MtCO2e, EJ_out, kgCO2_GJ)
+    mutate(kgCO2e_GJ = MtCO2e / EJ_out) %>%
+    select(fuel, scenario, year, GHG, MtCO2e, EJ_out, kgCO2e_GJ)
   
   fuels_upstream_nonco2_co2e <- bind_rows(fuels_upstream_nonco2_co2e, upstream_nonco2_co2e)
   }
@@ -228,9 +228,9 @@ fuels_upstream_nonco2_co2e <- fuels_upstream_nonco2_co2e %>%
   summarise(MtCO2e = sum(MtCO2e),
             EJ_out = sum(EJ_out)) %>%
   ungroup() %>%
-  mutate(kgCO2_GJ = MtCO2e / EJ_out) %>%
+  mutate(kgCO2e_GJ = MtCO2e / EJ_out) %>%
   rename(fuel = reporting_fuel) %>%
-  select(fuel, scenario, year, GHG, kgCO2_GJ)
+  select(fuel, scenario, year, GHG, kgCO2e_GJ)
 
 # tailpipe co2: this data table does not require any GCAM output, other than the scenario list
 fuels_tailpipe_co2 <- fuel_techs %>%
@@ -241,6 +241,7 @@ fuels_tailpipe_co2 <- fuel_techs %>%
   complete(nesting(reporting_fuel, kgCO2_GJ),
            year = ANALYSIS_YEARS,
            scenario = unique(outputs_tech$scenario)) %>%
+  drop_na() %>%
   select(fuel = reporting_fuel, scenario, year, kgCO2_GJ)
 
 #tailpipe nonco2s
