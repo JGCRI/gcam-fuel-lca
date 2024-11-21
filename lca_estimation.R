@@ -70,7 +70,7 @@ nonco2_tech <- getQuery(gcam_data.proj, "NonCO2 GHG emissions by tech") %>%
   select(scenario, sector, subsector, technology, input, year, value)
 
 # bind in ancillary data to inputs by technology data table
-inputs_tech <- bind_rows(inputs_tech, hydro_tech, ccs_tech,nonco2_tech)
+inputs_tech <- bind_rows(inputs_tech, hydro_tech, ccs_tech, nonco2_tech)
 
 inputs_sector <- inputs_tech %>%
   group_by(scenario, sector, input, year) %>%
@@ -121,7 +121,7 @@ for(i in 1:nrow(fuel_techs)){
   fuel_production <- outputs_tech %>%
     inner_join(fuel_techs[i,], by = c("sector", "subsector", "technology")) %>%
     select(scenario, fuel, year, EJ_out = value)
-  
+
   # Inputs one step upstream are determined as fuel production times each input's IO coefficient
   upstream_inputs <- outputs_tech %>%
     semi_join(fuel_techs[i,], by = c("sector", "subsector", "technology")) %>%
@@ -129,12 +129,12 @@ for(i in 1:nrow(fuel_techs)){
     mutate(value = value.x * value.y) %>%
     select(scenario, input, year, value) %>%
     rename(sector = input)
-  
+
   # separate out any primary energy inputs, and pass the remaining data table to the next step
   primary_inputs <- filter(upstream_inputs, sector %in% PRIMARY_COMMODITIES)
   upstream_nonco2 <- filter(upstream_inputs, sector %in% NONCO2_GHGS)
   upstream_inputs <- filter(upstream_inputs, !sector %in% c(PRIMARY_COMMODITIES, NONCO2_GHGS))
-  
+
   # Remaining steps are at the sectoral level. relationship="many-to-many" in the join as there may be multiple paths to
   # the same upstream commodity at the same recursion depth (e.g., electricity may be an input to multiple intermediate inputs)
     for(j in 1:RECURSION_DEPTH){
@@ -144,7 +144,7 @@ for(i in 1:nrow(fuel_techs)){
         mutate(value = value.x * value.y) %>%
         select(scenario, input, year, value) %>%
         rename(sector = input)
-      
+
       primary_inputs <- bind_rows(primary_inputs,
                                   filter(upstream_inputs, sector %in% PRIMARY_COMMODITIES))
       upstream_nonco2 <- bind_rows(upstream_nonco2,
@@ -160,7 +160,7 @@ for(i in 1:nrow(fuel_techs)){
   upstream_nonco2 <- group_by(upstream_nonco2, scenario, sector, year) %>%
     summarise(TG = sum(value)) %>%
     ungroup()
-  
+
   # calculate CO2 emissions (Mt CO2) by joining in emissions factors, multiplying, and adding
   # join in fuel output from the target technology to calculate the intensity (kg CO2 upstream per unit of fuel produced)
   upstream_co2 <- left_join(primary_inputs, co2_ef,
@@ -172,9 +172,9 @@ for(i in 1:nrow(fuel_techs)){
     left_join(fuel_production, by = c("scenario", "year")) %>%
     mutate(kgCO2_GJ = MtCO2 / EJ_out) %>%
     select(fuel, scenario, year, MtCO2, EJ_out, kgCO2_GJ)
-  
+
   fuels_upstream_co2 <- bind_rows(fuels_upstream_co2, upstream_co2)
-  
+
   primary_energy <- left_join(primary_inputs, co2_ef, by = "sector") %>%
     filter(!is.na(Primary_fuel)) %>%
     group_by(scenario, Primary_fuel, year) %>%
@@ -183,9 +183,9 @@ for(i in 1:nrow(fuel_techs)){
     left_join(fuel_production, by = c("scenario", "year")) %>%
     mutate(IO = EJ_in / EJ_out) %>%
     select(fuel, scenario, year, Primary_fuel, EJ_in, EJ_out, IO)
-  
+
   fuels_primary_energy <- bind_rows(fuels_primary_energy, primary_energy)
-  
+
   upstream_nonco2_co2e <- upstream_nonco2 %>%
     rename(GHG = sector) %>%
     left_join(nonco2_gwp, by = "GHG") %>%
@@ -193,12 +193,13 @@ for(i in 1:nrow(fuel_techs)){
     left_join(fuel_production, by = c("scenario", "year")) %>%
     mutate(kgCO2e_GJ = MtCO2e / EJ_out) %>%
     select(fuel, scenario, year, GHG, MtCO2e, EJ_out, kgCO2e_GJ)
-  
+
   fuels_upstream_nonco2_co2e <- bind_rows(fuels_upstream_nonco2_co2e, upstream_nonco2_co2e)
   }
 
 # in some cases, the fuel production technologies may be more granular than what we want for reporting.
 # collapse to a small number of reporting categories
+# subtract fossil carbon in fuels that will be reported as tailpipe co2
 fuels_upstream_co2 <- fuels_upstream_co2 %>%
   left_join(select(fuel_techs, fuel, reporting_fuel),
             by = "fuel") %>%
@@ -206,7 +207,9 @@ fuels_upstream_co2 <- fuels_upstream_co2 %>%
   summarise(MtCO2 = sum(MtCO2),
             EJ_out = sum(EJ_out)) %>%
   ungroup() %>%
-  mutate(kgCO2_GJ = MtCO2 / EJ_out) %>%
+  left_join(distinct(fuel_techs, reporting_fuel, kgCO2_GJ), by = "reporting_fuel") %>%
+  rename(kgCO2_GJ_tailpipe = kgCO2_GJ) %>%
+  mutate(kgCO2_GJ = MtCO2 / EJ_out - kgCO2_GJ_tailpipe) %>%
   rename(fuel = reporting_fuel) %>%
   select(fuel, scenario, year, kgCO2_GJ)
 
