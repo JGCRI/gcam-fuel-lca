@@ -23,18 +23,27 @@ NONCO2_GHGS <- c("CH4", "H2", "N2O")
 
 #-------------------------------------------------------------------------------
 
-gcam_data.proj <- loadProject("rgcam/gcam_data.proj")
-REQUERY_OUTPUT <- FALSE
-if(REQUERY_OUTPUT){
-  conn <- localDBConn("/Users/D3P747/Desktop/stash/freight_fuels/output/", "database_basexdb")
-  gcam_data.proj <- addScenario(conn, gcam_data.proj, c(), "rgcam/BatchQueries_gcam_lca.xml", clobber = TRUE)
-}
+# Query output is saved in blocks of 48 scenarios differentiated by ccs and policy assumptions
+# These files are in /rcfs/projects/intermodal/gpk-workspace
+# to copy locally:
+# scp USERNAME@deception.pnl.gov:/rcfs/projects/intermodal/gpk-workspace/query_out_*.proj ./rgcam
+
+query_out_c1p1.proj <- loadProject("rgcam/query_out_c1p1.proj")
+query_out_c2p1.proj <- loadProject("rgcam/query_out_c2p1.proj")
+query_out_c1p2.proj <- loadProject("rgcam/query_out_c1p2.proj")
+query_out_c2p2.proj <- loadProject("rgcam/query_out_c2p2.proj")
+query_out_c1p3.proj <- loadProject("rgcam/query_out_c1p3.proj")
+query_out_c2p3.proj <- loadProject("rgcam/query_out_c2p3.proj")
+
+query_out_all.proj <- c(query_out_c1p1.proj, query_out_c2p1.proj,
+                        query_out_c1p2.proj, query_out_c2p2.proj,
+                        query_out_c1p3.proj, query_out_c2p3.proj)
 
 # the method starts from a technology, so the queries are done at the technology level. however once the immediate inputs to
 # the technology are known, all subsequent upstream steps take place at the sectoral level.
 
 #outputs: drop all secondary outputs
-outputs_tech <- getQuery(gcam_data.proj, "outputs by tech") %>%
+outputs_tech <- getQuery(query_out_all.proj, "outputs by tech") %>%
   filter(output == sector, year %in% ANALYSIS_YEARS) %>%
   select(-region, -Units, -output)
 
@@ -44,7 +53,7 @@ outputs_sector <- outputs_tech %>%
   ungroup()
 
 #inputs: drop all water (not within scope of LCA), and oil-credits
-inputs_tech <- getQuery(gcam_data.proj, "inputs by tech") %>%
+inputs_tech <- getQuery(query_out_all.proj, "inputs by tech") %>%
   select(-Units, -region) %>%
   filter(!grepl("water", input),
          input != "oil-credits",
@@ -58,13 +67,13 @@ hydro_tech <- filter(outputs_tech,
 # non-co2 emissions and carbon storage are not technically inputs to a technology, but categorizing them as such
 # allows for the upstream attribution to take place alongside energy and co2 emissions attribution
 # mapping in carbon-storage
-ccs_tech <- getQuery(gcam_data.proj, "CO2 sequestration by tech") %>%
+ccs_tech <- getQuery(query_out_all.proj, "CO2 sequestration by tech") %>%
   filter(year %in% ANALYSIS_YEARS) %>%
   mutate(input = "carbon-storage") %>%
   select(scenario, sector, subsector, technology, input, year, value)
 
 # nonco2 emissions are similarly treated as inputs to a technology. Drop the AGR suffix
-nonco2_tech <- getQuery(gcam_data.proj, "NonCO2 GHG emissions by tech") %>%
+nonco2_tech <- getQuery(query_out_all.proj, "NonCO2 GHG emissions by tech") %>%
   mutate(input = sub("_AGR", "", ghg)) %>%
   filter(year %in% ANALYSIS_YEARS) %>%
   select(scenario, sector, subsector, technology, input, year, value)
@@ -264,10 +273,10 @@ fuels_tailpipe_nonco2_co2e <- outputs_tech %>%
 
 # prices: calculated from output-weighted average where multiple techs pipe to the same reporting fuel
 # the first step is to add in the delivery costs where those are indicated in a separate sector
-delivered_fuel_prices <- getQuery(gcam_data.proj, "prices by sector") %>%
+delivered_fuel_prices <- getQuery(query_out_all.proj, "prices by sector") %>%
   filter(year %in% ANALYSIS_YEARS,
          sector %in% fuel_delivery_cost$delivery_cost)
-delivery_costs <- getQuery(gcam_data.proj, "prices by sector") %>%
+delivery_costs <- getQuery(query_out_all.proj, "prices by sector") %>%
   filter(year %in% ANALYSIS_YEARS,
          sector %in% fuel_delivery_cost$sector) %>%
   left_join(fuel_delivery_cost, by = "sector") %>%
@@ -276,12 +285,12 @@ delivery_costs <- getQuery(gcam_data.proj, "prices by sector") %>%
   select(scenario, sector, year, delivery_cost)
 
 # co2 penalties are estimated from scenario-specific co2 prices, converted to 2020$ per kg of CO2
-co2_penalties <- getQuery(gcam_data.proj, "CO2 prices") %>%
+co2_penalties <- getQuery(query_out_all.proj, "CO2 prices") %>%
   filter(market == "USACO2") %>%
   mutate(USD_kgCO2 = value * CONV_USD_1990_2020 / CONV_C_CO2 / 1000) %>%
   select(scenario, year, USD_kgCO2)
 
-fuels_prices <- getQuery(gcam_data.proj, "costs by tech") %>%
+fuels_prices <- getQuery(query_out_all.proj, "costs by tech") %>%
   inner_join(fuel_techs, by = c("sector", "subsector", "technology")) %>%
   filter(year %in% ANALYSIS_YEARS) %>%
   left_join(delivery_costs, by = c("scenario", "sector", "year")) %>%
@@ -298,12 +307,27 @@ fuels_prices <- getQuery(gcam_data.proj, "costs by tech") %>%
   mutate(price_USDperGJ = weighted.price / value.quantity) %>%
   select(-weighted.price, -value.quantity)
 
+# Add the emissions source information to the emissions data tables and bind
+fuels_upstream_co2 <- mutate(fuels_upstream_co2,
+                             GHG = "CO2", source =  "Upstream CO2") %>%
+  rename(kgCO2e_GJ = kgCO2_GJ)
+fuels_upstream_nonco2_co2e <- mutate(fuels_upstream_nonco2_co2e,
+                                     source = paste("Upstream", GHG))
+fuels_tailpipe_co2 <- mutate(fuels_tailpipe_co2,
+                             GHG = "CO2", source =  "Tailpipe CO2") %>%
+  rename(kgCO2e_GJ = kgCO2_GJ)
+fuels_tailpipe_nonco2_co2e <- mutate(fuels_tailpipe_nonco2_co2e,
+                                     source = paste("Tailpipe", GHG))
+
+fuels_lca_ghg <- bind_rows(fuels_upstream_co2,
+                           fuels_upstream_nonco2_co2e,
+                           fuels_tailpipe_co2,
+                           fuels_tailpipe_nonco2_co2e) %>%
+  select(scenario, fuel, GHG, source, year, kgCO2e_GJ)
+
 # write out the data tables
-write_csv(fuels_upstream_co2, "outputs/fuels_upstream_co2.csv")
+write_csv(fuels_lca_ghg, "outputs/fuels_lca_ghg.csv")
 write_csv(fuels_primary_energy, "outputs/fuels_primary_energy.csv")
-write_csv(fuels_upstream_nonco2_co2e, "outputs/fuels_upstream_nonco2_co2e.csv")
-write_csv(fuels_tailpipe_co2, "outputs/fuels_tailpipe_co2.csv")
-write_csv(fuels_tailpipe_nonco2_co2e, "outputs/fuels_tailpipe_nonco2_co2e.csv")
 write_csv(fuels_prices, "outputs/fuels_prices.csv")
 
 
