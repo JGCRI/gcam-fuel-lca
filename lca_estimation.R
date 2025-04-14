@@ -10,6 +10,7 @@ fuel_techs <- read_csv("inputs/fuel_techs.csv")
 co2_ef <- read_csv("inputs/co2_ef.csv")
 nonco2_gwp <- read_csv("inputs/nonco2_gwp.csv")
 fuel_delivery_cost <- read_csv("inputs/fuel_delivery_cost.csv")
+scenario_definitions <- read_csv("inputs/scenario_definitions.csv")
 
 #-------------------------------------------------------------------------------
 
@@ -17,11 +18,25 @@ CONV_USD_1975_2020 <- 3.8
 CONV_USD_1990_2020 <- 1.772
 CONV_C_CO2 <- 44/12
 ANALYSIS_YEARS <- seq(2030, 2050, 10)
+LUC_YEARS <- 2025:2050
 RECURSION_DEPTH <- 10
 PRIMARY_COMMODITIES <- co2_ef$sector
 NONCO2_GHGS <- c("CH4", "H2", "N2O")
+ROUNDING_DIGITS <- 5
 
+# For GREET comparison we need to use the convention of assigning equal tailpipe and
+# upstream CO2 from biofuel and e-fuel production and use, rather than leaving both as 0
+# This is a non-standard convention in GHG emissions accounting so it is provided
+# here as an option
+USE_GREET_CO2_REPORTING <- TRUE
+KGCO2GJ_FOR_GREET_REPORTING <- fuel_techs$kgCO2_GJ[fuel_techs$fuel == "petroleum diesel"]
+FUELS_WITH_GREET_REPORTING <- unique(fuel_techs$reporting_fuel[fuel_techs$sector == "diesel" &
+                                                        fuel_techs$kgCO2_GJ == 0])
 #-------------------------------------------------------------------------------
+
+approx_fun <- function(year, value, rule = 1) {
+  stats::approx(as.vector(year), value, rule = rule, xout = year, ties = mean)$y
+}
 
 # Query output is saved in blocks of 48 scenarios differentiated by ccs and policy assumptions
 # These files are in /rcfs/projects/intermodal/gpk-workspace
@@ -38,6 +53,8 @@ query_out_c2p3.proj <- loadProject("rgcam/query_out_c2p3.proj")
 query_out_all.proj <- c(query_out_c1p1.proj, query_out_c2p1.proj,
                         query_out_c1p2.proj, query_out_c2p2.proj,
                         query_out_c1p3.proj, query_out_c2p3.proj)
+
+query_out_luc.proj <- loadProject("rgcam/query_out_luc.proj")
 
 # the method starts from a technology, so the queries are done at the technology level. however once the immediate inputs to
 # the technology are known, all subsequent upstream steps take place at the sectoral level.
@@ -229,7 +246,7 @@ fuels_primary_energy <- fuels_primary_energy %>%
   summarise(EJ_in = sum(EJ_in),
             EJ_out = sum(EJ_out)) %>%
   ungroup() %>%
-  mutate(IO = EJ_in / EJ_out) %>%
+  mutate(IO = round(EJ_in / EJ_out, digits = ROUNDING_DIGITS)) %>%
   rename(fuel = reporting_fuel) %>%
   select(fuel, scenario, year, Primary_fuel, IO)
 
@@ -256,19 +273,33 @@ fuels_tailpipe_co2 <- fuel_techs %>%
   drop_na() %>%
   select(fuel = reporting_fuel, scenario, year, kgCO2_GJ)
 
-#tailpipe nonco2s
-fuels_tailpipe_nonco2_co2e <- outputs_tech %>%
-  inner_join(fuel_techs, by = c("sector", "subsector", "technology")) %>%
-  filter(year %in% ANALYSIS_YEARS) %>%
-  inner_join(nonco2_tech, by = c("scenario", "sector", "subsector", "technology", "year"),
-             suffix = c(".EJ", ".TG")) %>%
+#tailpipe nonco2s: reported by the downstream consumers
+# determine the nonco2 emissions from downstream freight transportation consumers,
+# aggregate by general fuel type, calculate emissions factors, and expand to
+# full reporting set of fuels.
+fuels_tailpipe_nonco2_co2e <- filter(inputs_tech,
+                                input %in% c(fuel_techs$sector, fuel_delivery_cost$delivery_cost),
+                                sector %in% c("trn_freight_road", "trn_freight", "trn_shipping_intl")) %>%
+  # for fuels whose end-use commodities have a different name from the fuel production sector, make the replacement
+  left_join(fuel_delivery_cost, by = c(input = "delivery_cost"), suffix = c("", ".revised")) %>%
+  mutate(fuel_category = if_else(is.na(sector.revised), input, sector.revised)) %>%
+  rename(fuel_EJ = value) %>%
+  select(-sector.revised, -input) %>%
+  # join the nonco2 emissions to the energy consumption. this is an expanding join for freight
+  # technologies that produce multiple GHGs, and a filtering join for those that produce none.
+  inner_join(nonco2_tech, by = c("scenario", "sector", "subsector", "technology", "year")) %>%
   rename(GHG = input) %>%
   left_join(nonco2_gwp, by = "GHG") %>%
-  group_by(reporting_fuel, scenario, year, GHG) %>%
-  summarise(value.MtCO2e = sum(value.TG * GWP),
-            value.EJ = sum(value.EJ)) %>%
+  mutate(MtCO2e = value * GWP) %>%
+  group_by(scenario, fuel_category, year, GHG) %>%
+  summarise(fuel_EJ = sum(fuel_EJ),
+            MtCO2e = sum(MtCO2e)) %>%
   ungroup() %>%
-  mutate(kgCO2e_GJ = value.MtCO2e / value.EJ) %>%
+  mutate(kgCO2e_GJ = MtCO2e / fuel_EJ) %>%
+  # expand the general fuels (e.g. diesel) to the reporting fuels (e.g., petroleum diesel, bio-based, e-diesel)
+  left_join(distinct(fuel_techs, sector, reporting_fuel),
+            by = c(fuel_category = "sector"),
+            relationship = "many-to-many") %>%
   select(fuel = reporting_fuel, scenario, year, GHG, kgCO2e_GJ)
 
 # prices: calculated from output-weighted average where multiple techs pipe to the same reporting fuel
@@ -304,7 +335,7 @@ fuels_prices <- getQuery(query_out_all.proj, "costs by tech") %>%
   summarise(weighted.price = sum(weighted.price),
             value.quantity = sum(value.quantity)) %>%
   ungroup() %>%
-  mutate(price_USDperGJ = weighted.price / value.quantity) %>%
+  mutate(price_USDperGJ = round(weighted.price / value.quantity, ROUNDING_DIGITS)) %>%
   select(-weighted.price, -value.quantity)
 
 # Add the emissions source information to the emissions data tables and bind
@@ -319,11 +350,96 @@ fuels_tailpipe_co2 <- mutate(fuels_tailpipe_co2,
 fuels_tailpipe_nonco2_co2e <- mutate(fuels_tailpipe_nonco2_co2e,
                                      source = paste("Tailpipe", GHG))
 
+# Apply GREET convention on carbon-based fuels whose CO2 is not counted in standard accounting
+if(USE_GREET_CO2_REPORTING){
+  fuels_upstream_co2$kgCO2e_GJ[fuels_upstream_co2$fuel %in% FUELS_WITH_GREET_REPORTING] <-
+    fuels_upstream_co2$kgCO2e_GJ[fuels_upstream_co2$fuel %in% FUELS_WITH_GREET_REPORTING] -
+    KGCO2GJ_FOR_GREET_REPORTING
+  
+  fuels_tailpipe_co2$kgCO2e_GJ[fuels_tailpipe_co2$fuel %in% FUELS_WITH_GREET_REPORTING] <-
+    fuels_tailpipe_co2$kgCO2e_GJ[fuels_tailpipe_co2$fuel %in% FUELS_WITH_GREET_REPORTING] +
+    KGCO2GJ_FOR_GREET_REPORTING
+}
+
+# Calculate LUC CO2 as cumulative additional LUC_CO2 divided by cumulative additional biofuel production
+luc_fuel_map <- filter(fuel_techs, !is.na(luc_fuel)) %>%
+  distinct(reporting_fuel, luc_fuel)
+LUC <- getQuery(query_out_luc.proj, "LUC emissions by region") %>%
+  filter(year %in% LUC_YEARS) %>%
+  group_by(scenario, year) %>%
+  summarise(luc = sum(value)) %>%
+  ungroup() %>%
+  complete(nesting(scenario), year = LUC_YEARS) %>%
+  group_by(scenario) %>%
+  mutate(luc = approx_fun(year, luc)) %>%
+  summarise(luc = sum(luc)) %>%
+  ungroup() %>%
+  separate(scenario, into = c("drop", "luc_fuel", "Policy"), sep = "_") %>%
+  left_join(luc_fuel_map, by = "luc_fuel") %>%
+  select(-drop)
+
+baseLUC <- filter(LUC, luc_fuel == "base") %>%
+  select(-reporting_fuel)
+addLUC <- filter(LUC, luc_fuel != "base") %>%
+  left_join(baseLUC, by = "Policy", suffix = c("", ".base")) %>%
+  mutate(LUC_MtCO2e = (luc - luc.base) * CONV_C_CO2) %>%
+  select(reporting_fuel, Policy, LUC_MtCO2e)
+
+# Cumulative additional fuel production
+fuel_production <- getQuery(query_out_luc.proj, "outputs by tech") %>%
+  filter(output == sector, year %in% LUC_YEARS) %>%
+  select(-region, -Units, -output) %>%
+  inner_join(subset(fuel_techs, !is.na(luc_fuel)), by = c("sector", "subsector", "technology")) %>%
+  group_by(scenario, reporting_fuel, luc_fuel, year) %>%
+  summarise(Fuel_EJ = sum(value)) %>%
+  ungroup() %>%
+  complete(nesting(scenario, reporting_fuel, luc_fuel), year = LUC_YEARS) %>%
+  group_by(scenario, reporting_fuel, luc_fuel) %>%
+  mutate(Fuel_EJ = approx_fun(year, Fuel_EJ)) %>%
+  summarise(Fuel_EJ = sum(Fuel_EJ)) %>%
+  ungroup() %>%
+  separate(scenario, into = c("drop", "luc_fuel", "Policy"), sep = "_") %>%
+  select(-drop)
+
+basefuelprod <- filter(fuel_production, luc_fuel == "base") %>%
+  select(-luc_fuel)
+addfuelprod <- filter(fuel_production, luc_fuel != "base") %>%
+  semi_join(distinct(fuel_techs, reporting_fuel, luc_fuel)) %>%
+  left_join(basefuelprod, by = c("Policy", "reporting_fuel"), suffix = c("", ".base")) %>%
+  mutate(Fuel_EJ = Fuel_EJ - Fuel_EJ.base) %>%
+  select(reporting_fuel, Policy, Fuel_EJ)
+
+LUC_CO2_GJ = left_join(addLUC, addfuelprod, by = c("reporting_fuel", "Policy")) %>%
+  mutate(LUC_kgCO2_GJ = LUC_MtCO2e / Fuel_EJ) %>%
+  select(fuel = reporting_fuel, Policy, LUC_kgCO2_GJ)
+
+#Add LUC CO2 to upstream CO2 (not disaggregating as a series)
+fuels_upstream_co2 <- fuels_upstream_co2 %>%
+  mutate(Policy = substr(scenario, nchar(scenario) - 1, nchar(scenario))) %>%
+  left_join(LUC_CO2_GJ, by = c("fuel", "Policy")) %>%
+  mutate(kgCO2e_GJ = if_else(is.na(LUC_kgCO2_GJ), kgCO2e_GJ, kgCO2e_GJ + LUC_kgCO2_GJ)) %>%
+  select(-Policy, -LUC_kgCO2_GJ)
+
 fuels_lca_ghg <- bind_rows(fuels_upstream_co2,
                            fuels_upstream_nonco2_co2e,
                            fuels_tailpipe_co2,
                            fuels_tailpipe_nonco2_co2e) %>%
-  select(scenario, fuel, GHG, source, year, kgCO2e_GJ)
+  select(scenario, fuel, GHG, source, year, kgCO2e_GJ) %>%
+  mutate(kgCO2e_GJ = round(kgCO2e_GJ, digits = ROUNDING_DIGITS))
+
+# disambiguate the scenario names to their categories and levels/descriptions
+disambiguate_scenario_name <- function(df){
+  variable_names <- unique(scenario_definitions$variable_name)
+  df_final <- separate(df, scenario, into = variable_names, sep = c(2,4,6,8,10), remove = FALSE)
+  for(var in variable_names){
+    df_final[[var]] <- scenario_definitions$description[match(df_final[[var]], scenario_definitions$string)]
+  }
+  return(df_final)
+}
+  
+fuels_lca_ghg <- disambiguate_scenario_name(fuels_lca_ghg)
+fuels_primary_energy <- disambiguate_scenario_name(fuels_primary_energy)
+fuels_prices <- disambiguate_scenario_name(fuels_prices)
 
 # write out the data tables
 write_csv(fuels_lca_ghg, "outputs/fuels_lca_ghg.csv")

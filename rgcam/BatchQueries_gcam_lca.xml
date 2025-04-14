@@ -64,4 +64,46 @@
     			<comments/>
 			</marketQuery>
       </aQuery>
-    </queries>
+    <aQuery>
+		<region name="USA"/>
+		<region name="Canada"/>		
+		<region name="Africa_Eastern"/>		
+		<region name="Africa_Northern"/>		
+		<region name="Africa_Southern"/>
+		<region name="Africa_Western"/>
+		<region name="Japan"/>
+		<region name="South Korea"/>
+		<region name="China"/>
+		<region name="India"/>
+		<region name="Brazil"/>
+		<region name="Central America and Caribbean"/>
+		<region name="Central Asia"/>
+		<region name="EU-12"/>	
+		<region name="EU-15"/>
+		<region name="Europe_Eastern"/>
+		<region name="Europe_Non_EU"/>
+		<region name="European Free Trade Association"/>
+		<region name="Indonesia"/>
+		<region name="Mexico"/>
+		<region name="Middle East"/>
+		<region name="Pakistan"/>
+		<region name="Russia"/>
+		<region name="South Africa"/>
+		<region name="South America_Northern"/>
+		<region name="South America_Southern"/>
+		<region name="South Asia"/>
+		<region name="Southeast Asia"/>
+		<region name="Taiwan"/>
+		<region name="Argentina"/>
+		<region name="Colombia"/>
+		<region name="Australia_NZ"/>
+			<query title="LUC emissions by region">
+			<axis1 name="region">region</axis1>
+                <axis2 name="Year">land-use-change-emission[@year]</axis2>
+                <xPath buildList="true" dataName="land-use-change-emission" group="false" sumAll="true">/LandNode[@name='root' or @type='LandNode' (:collapse:)]//
+                    LandLeaf[true() or @type='LandLeaf' (: collapse :)]/land-carbon-densities/
+                land-use-change-emission[@year&gt;2015 and @year&lt;2055]/text()</xPath>
+                <comments/>
+			</query>
+    </aQuery>
+</queries>

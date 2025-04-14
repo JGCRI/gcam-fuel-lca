@@ -1,0 +1,17 @@
+string,variable_name,description
+h1,Hydrogen and Ammonia,Default
+h2,Hydrogen and Ammonia,Green (Default cost)
+h3,Hydrogen and Ammonia,Green (Advanced cost)
+h4,Hydrogen and Ammonia,Blue
+r1,Renewable Electricity,Default
+r2,Renewable Electricity,Advanced cost
+r3,Renewable Electricity,Constrained
+b1,Biomass Supply,Default
+b2,Biomass Supply,Constrained
+n1,Nuclear Electricity,Default
+n2,Nuclear Electricity,Advanced cost
+c1,CO2 Storage,Default
+c2,CO2 Storage,Constrained
+p1,Emissions Policy,No policy
+p2,Emissions Policy,50 Percent by 2050
+p3,Emissions Policy,Net Zero by 2050
