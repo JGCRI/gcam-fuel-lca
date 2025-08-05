@@ -17,8 +17,8 @@ scenario_definitions <- read_csv("inputs/scenario_definitions.csv")
 CONV_USD_1975_2020 <- 3.8
 CONV_USD_1990_2020 <- 1.772
 CONV_C_CO2 <- 44/12
-ANALYSIS_YEARS <- seq(2030, 2050, 10)
-LUC_YEARS <- 2025:2050
+ANALYSIS_YEARS <- seq(2020, 2050, 5)
+LUC_YEARS <- 2020:2050
 RECURSION_DEPTH <- 10
 PRIMARY_COMMODITIES <- co2_ef$sector
 NONCO2_GHGS <- c("CH4", "H2", "N2O")
@@ -326,9 +326,11 @@ fuels_prices <- getQuery(query_out_all.proj, "costs by tech") %>%
   filter(year %in% ANALYSIS_YEARS) %>%
   left_join(delivery_costs, by = c("scenario", "sector", "year")) %>%
   left_join(co2_penalties, by = c("scenario", "year")) %>%
-  replace_na(list(delivery_cost = 0, USD_kgCO2 = 0)) %>%
   left_join(outputs_tech, by = c("scenario", "sector", "subsector", "technology", "year"),
             suffix = c(".price", ".quantity")) %>%
+  replace_na(list(delivery_cost = 0,
+                  USD_kgCO2 = 0,
+                  value.quantity = 0)) %>%
   mutate(total.price = (value.price + delivery_cost) * CONV_USD_1975_2020 + (kgCO2_GJ * USD_kgCO2),
          weighted.price = total.price * value.quantity) %>%
   group_by(scenario, reporting_fuel, year) %>%
@@ -355,7 +357,7 @@ if(USE_GREET_CO2_REPORTING){
   fuels_upstream_co2$kgCO2e_GJ[fuels_upstream_co2$fuel %in% FUELS_WITH_GREET_REPORTING] <-
     fuels_upstream_co2$kgCO2e_GJ[fuels_upstream_co2$fuel %in% FUELS_WITH_GREET_REPORTING] -
     KGCO2GJ_FOR_GREET_REPORTING
-  
+
   fuels_tailpipe_co2$kgCO2e_GJ[fuels_tailpipe_co2$fuel %in% FUELS_WITH_GREET_REPORTING] <-
     fuels_tailpipe_co2$kgCO2e_GJ[fuels_tailpipe_co2$fuel %in% FUELS_WITH_GREET_REPORTING] +
     KGCO2GJ_FOR_GREET_REPORTING
@@ -436,7 +438,7 @@ disambiguate_scenario_name <- function(df){
   }
   return(df_final)
 }
-  
+
 fuels_lca_ghg <- disambiguate_scenario_name(fuels_lca_ghg)
 fuels_primary_energy <- disambiguate_scenario_name(fuels_primary_energy)
 fuels_prices <- disambiguate_scenario_name(fuels_prices)
